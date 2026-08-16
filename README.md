@@ -36,8 +36,19 @@ Not in v1: Street View, nearby search dump, traffic-alert watches, `route_steps`
 Maps Platform **API key** on this process. The kernel never sees it. `link_resolve` works with no key.
 
 ```bash
-export GOOGLE_MAPS_API_KEY="…"   # console.cloud.google.com → Maps Platform
+export GOOGLE_MAPS_API_KEY="…"   # console.cloud.google.com → APIs & Services → Credentials
 ```
+
+Enable these two in **APIs & Services → Library** (a key alone is not enough):
+
+| API | Used by |
+| --- | --- |
+| [Geocoding API](https://console.cloud.google.com/apis/library/geocoding-backend.googleapis.com) | `place_resolve` |
+| [Directions API](https://console.cloud.google.com/apis/library/directions-backend.googleapis.com) | `route_eta` |
+
+If the key has **API restrictions**, allow those two. Do not enable Distance Matrix — `route_eta` already returns distance from Directions.
+
+`REQUEST_DENIED` usually means the API is off or the key’s restriction list omitted it.
 
 ## Install
 
