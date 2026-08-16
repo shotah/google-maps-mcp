@@ -24,12 +24,13 @@ Naming contract: [ai-gantry `docs/mcp-naming.md`](https://github.com/shotah/ai-g
 | Tool | Host name | Auth | What it does |
 | --- | --- | --- | --- |
 | `link_resolve` | `maps__link_resolve` | none | Follow a Maps share / short URL → canonical `google.com/maps/…` plus name / coords / dir endpoints |
-| `place_resolve` | `maps__place_resolve` | `GOOGLE_MAPS_API_KEY` | Query or address → place_id, lat/lng, name. Share URLs are expanded first |
+| `place_resolve` | `maps__place_resolve` | `GOOGLE_MAPS_API_KEY` | One place (name, address, or share URL) → coords, rating, a few reviews, Maps URL |
+| `place_search` | `maps__place_search` | `GOOGLE_MAPS_API_KEY` | “sushi near Ballard” → a few rated places + Maps links. Optional `near`, `limit` (default 5, max 8) |
 | `route_eta` | `maps__route_eta` | `GOOGLE_MAPS_API_KEY` | Origin + destination → duration, distance, and a tap-to-open Maps URL. Optional `mode`: driving (default), walking, bicycling, transit |
 
 `link_resolve` accepts `maps.app.goo.gl`, `goo.gl/maps`, `g.co/maps`, and already-long `google.com/maps` URLs (parsed, no fetch). Redirects stay on Maps hosts only.
 
-Not in v1: Street View, nearby search dump, traffic-alert watches, `route_steps`.
+Not in v1: Street View, unbounded nearby dump, traffic-alert watches, `route_steps`.
 
 ## Auth
 
@@ -39,16 +40,21 @@ Maps Platform **API key** on this process. The kernel never sees it. `link_resol
 export GOOGLE_MAPS_API_KEY="…"   # console.cloud.google.com → APIs & Services → Credentials
 ```
 
-Enable these two in **APIs & Services → Library** (a key alone is not enough):
+A key alone is not enough. In [GCP Console](https://console.cloud.google.com/):
 
-| API | Used by |
-| --- | --- |
-| [Geocoding API](https://console.cloud.google.com/apis/library/geocoding-backend.googleapis.com) | `place_resolve` |
-| [Directions API](https://console.cloud.google.com/apis/library/directions-backend.googleapis.com) | `route_eta` |
+1. **APIs & Services → Library** — enable these three:
 
-If the key has **API restrictions**, allow those two. Do not enable Distance Matrix — `route_eta` already returns distance from Directions.
+   | API | Used by |
+   | --- | --- |
+   | [Geocoding API](https://console.cloud.google.com/apis/library/geocoding-backend.googleapis.com) | `place_resolve`, `place_search` (`near`) |
+   | [Places API](https://console.cloud.google.com/apis/library/places-backend.googleapis.com) | `place_search`; reviews on `place_resolve` |
+   | [Directions API](https://console.cloud.google.com/apis/library/directions-backend.googleapis.com) | `route_eta` |
 
-`REQUEST_DENIED` usually means the API is off or the key’s restriction list omitted it.
+2. **APIs & Services → Credentials** — open the key. Under **API restrictions**, leave unrestricted **or** allow those three.
+
+Do not enable Distance Matrix — `route_eta` already returns distance from Directions. `link_resolve` needs no API.
+
+`REQUEST_DENIED` usually means an API is off or the key’s restriction list omitted it.
 
 ## Install
 

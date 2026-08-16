@@ -16,12 +16,12 @@ import (
 
 const defaultMapsBase = "https://maps.googleapis.com"
 
-var errMissingKey = errors.New(`GOOGLE_MAPS_API_KEY is not set. Next: set GOOGLE_MAPS_API_KEY on this process (Maps Platform key), then place_resolve(query="Space Needle") or route_eta(origin="Seattle", destination="Portland")`)
+var errMissingKey = errors.New(`GOOGLE_MAPS_API_KEY is not set. Next: set GOOGLE_MAPS_API_KEY on this process (Maps Platform key), then place_resolve(query="Space Needle") or place_search(query="sushi near Ballard")`)
 
 // newClient builds the Maps Platform client. Tests replace this.
 var newClient = clientFromEnv
 
-// Client talks to official Google Maps Platform HTTP APIs (Geocoding, Directions).
+// Client talks to official Google Maps Platform HTTP APIs (Geocoding, Places, Directions).
 type Client struct {
 	HTTP     *http.Client
 	BaseURL  string
@@ -89,6 +89,51 @@ type textValue struct {
 	Value int    `json:"value"`
 }
 
+type latLng struct {
+	Lat float64 `json:"lat"`
+	Lng float64 `json:"lng"`
+}
+
+type placeJSON struct {
+	PlaceID          string  `json:"place_id"`
+	Name             string  `json:"name"`
+	FormattedAddress string  `json:"formatted_address"`
+	Vicinity         string  `json:"vicinity"`
+	Rating           float64 `json:"rating"`
+	UserRatingsTotal int     `json:"user_ratings_total"`
+	PriceLevel       int     `json:"price_level"`
+	URL              string  `json:"url"`
+	Website          string  `json:"website"`
+	Geometry         struct {
+		Location latLng `json:"location"`
+	} `json:"geometry"`
+	OpeningHours *struct {
+		OpenNow bool `json:"open_now"`
+	} `json:"opening_hours"`
+	Reviews []reviewJSON `json:"reviews"`
+}
+
+type reviewJSON struct {
+	AuthorName              string `json:"author_name"`
+	Rating                  int    `json:"rating"`
+	Text                    string `json:"text"`
+	RelativeTimeDescription string `json:"relative_time_description"`
+}
+
+type placesSearchResponse struct {
+	Status       string      `json:"status"`
+	ErrorMessage string      `json:"error_message"`
+	Results      []placeJSON `json:"results"`
+}
+
+type placeDetailsResponse struct {
+	Status       string    `json:"status"`
+	ErrorMessage string    `json:"error_message"`
+	Result       placeJSON `json:"result"`
+}
+
+const placeDetailsFields = "name,place_id,formatted_address,geometry,rating,user_ratings_total,url,reviews,website,price_level,opening_hours"
+
 func clientFromEnv() (*Client, error) {
 	key := strings.TrimSpace(os.Getenv("GOOGLE_MAPS_API_KEY"))
 	if key == "" {
@@ -145,6 +190,128 @@ func (c *Client) geocode(ctx context.Context, q url.Values, query string) (Place
 		Lat:     r.Geometry.Location.Lat,
 		Lng:     r.Geometry.Location.Lng,
 	}, nil
+}
+
+// TextSearch finds places via the Places Text Search API.
+func (c *Client) TextSearch(ctx context.Context, query, location string, radiusM int) ([]PlaceHit, error) {
+	q := url.Values{}
+	q.Set("query", query)
+	if location != "" {
+		q.Set("location", location)
+		if radiusM < 1 {
+			radiusM = defaultSearchRadiusM
+		}
+		q.Set("radius", strconv.Itoa(radiusM))
+	}
+	body, status, err := c.get(ctx, "/maps/api/place/textsearch/json", q)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, parseAPIError(status, body)
+	}
+	var resp placesSearchResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("places search: %w", err)
+	}
+	if resp.Status != "OK" || len(resp.Results) == 0 {
+		return nil, mapsStatusError(http.StatusOK, resp.Status, resp.ErrorMessage)
+	}
+	out := make([]PlaceHit, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		out = append(out, placeHitFromJSON(r))
+	}
+	return out, nil
+}
+
+// PlaceDetails loads rating and reviews via the Places Details API.
+func (c *Client) PlaceDetails(ctx context.Context, placeID string) (PlaceResult, error) {
+	q := url.Values{}
+	q.Set("place_id", placeID)
+	q.Set("fields", placeDetailsFields)
+	body, status, err := c.get(ctx, "/maps/api/place/details/json", q)
+	if err != nil {
+		return PlaceResult{}, err
+	}
+	if status != http.StatusOK {
+		return PlaceResult{}, parseAPIError(status, body)
+	}
+	var resp placeDetailsResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return PlaceResult{}, fmt.Errorf("place details: %w", err)
+	}
+	if resp.Status != "OK" || (strings.TrimSpace(resp.Result.PlaceID) == "" && strings.TrimSpace(resp.Result.Name) == "") {
+		return PlaceResult{}, mapsStatusError(http.StatusOK, resp.Status, resp.ErrorMessage)
+	}
+	return placeResultFromJSON(resp.Result), nil
+}
+
+func placeHitFromJSON(r placeJSON) PlaceHit {
+	addr := firstNonEmpty(r.FormattedAddress, r.Vicinity)
+	hit := PlaceHit{
+		PlaceID:    r.PlaceID,
+		Name:       r.Name,
+		Address:    addr,
+		Lat:        r.Geometry.Location.Lat,
+		Lng:        r.Geometry.Location.Lng,
+		Rating:     r.Rating,
+		Ratings:    r.UserRatingsTotal,
+		PriceLevel: r.PriceLevel,
+		URL:        firstNonEmpty(r.URL, placeMapsURL(r.Name, r.PlaceID)),
+	}
+	if r.OpeningHours != nil {
+		open := r.OpeningHours.OpenNow
+		hit.OpenNow = &open
+	}
+	return hit
+}
+
+func placeResultFromJSON(r placeJSON) PlaceResult {
+	hit := placeHitFromJSON(r)
+	return PlaceResult{
+		PlaceID: hit.PlaceID,
+		Name:    hit.Name,
+		Address: hit.Address,
+		Lat:     hit.Lat,
+		Lng:     hit.Lng,
+		Rating:  hit.Rating,
+		Ratings: hit.Ratings,
+		URL:     hit.URL,
+		Website: r.Website,
+		OpenNow: hit.OpenNow,
+		Reviews: clipReviews(r.Reviews),
+	}
+}
+
+func clipReviews(in []reviewJSON) []PlaceReview {
+	if len(in) == 0 {
+		return nil
+	}
+	n := min(len(in), maxReviews)
+	out := make([]PlaceReview, 0, n)
+	for _, r := range in[:n] {
+		text := strings.TrimSpace(r.Text)
+		if len(text) > maxReviewChars {
+			text = strings.TrimSpace(text[:maxReviewChars]) + "…"
+		}
+		out = append(out, PlaceReview{
+			Author: r.AuthorName,
+			Rating: r.Rating,
+			Text:   text,
+			When:   r.RelativeTimeDescription,
+		})
+	}
+	return out
+}
+
+func placeMapsURL(name, placeID string) string {
+	q := url.Values{}
+	q.Set("api", "1")
+	q.Set("query", firstNonEmpty(name, placeID))
+	if placeID != "" {
+		q.Set("query_place_id", placeID)
+	}
+	return "https://www.google.com/maps/search/?" + q.Encode()
 }
 
 // Directions returns the first route via the Directions API.

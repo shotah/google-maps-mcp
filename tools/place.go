@@ -14,19 +14,38 @@ import (
 
 var errQueryRequired = errors.New(`query is required. ` + nextPlaceResolve)
 
+const (
+	maxReviews     = 3
+	maxReviewChars = 400
+)
+
+// PlaceReview is one Google review snippet.
+type PlaceReview struct {
+	Author string `json:"author,omitempty"`
+	Rating int    `json:"rating,omitempty"`
+	Text   string `json:"text,omitempty"`
+	When   string `json:"when,omitempty"`
+}
+
 // PlaceResult is what place_resolve returns.
 type PlaceResult struct {
-	Query   string  `json:"query"`
-	PlaceID string  `json:"place_id,omitempty"`
-	Name    string  `json:"name,omitempty"`
-	Address string  `json:"address,omitempty"`
-	Lat     float64 `json:"lat"`
-	Lng     float64 `json:"lng"`
+	Query   string        `json:"query"`
+	PlaceID string        `json:"place_id,omitempty"`
+	Name    string        `json:"name,omitempty"`
+	Address string        `json:"address,omitempty"`
+	Lat     float64       `json:"lat"`
+	Lng     float64       `json:"lng"`
+	Rating  float64       `json:"rating,omitempty"`
+	Ratings int           `json:"ratings,omitempty"`
+	OpenNow *bool         `json:"open_now,omitempty"`
+	URL     string        `json:"url,omitempty"`
+	Website string        `json:"website,omitempty"`
+	Reviews []PlaceReview `json:"reviews,omitempty"`
 }
 
 func registerPlace(s *mcpserver.MCPServer) {
 	tool := mcp.NewTool(ToolPlace,
-		mcp.WithDescription("Resolve a place name or address to place_id, coordinates, and name. Use for “what is this pin” and “where is X”. If query is a Maps share URL, expands it first (same hop as link_resolve). Needs GOOGLE_MAPS_API_KEY. Official Geocoding API only — not a scrape."),
+		mcp.WithDescription("Look up one place by name, address, or Maps share URL. Returns place_id, coordinates, rating, a few reviews, and a Maps URL. Use for “what is this pin” and “tell me about X”. For “sushi near Ballard” use place_search. Needs GOOGLE_MAPS_API_KEY."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Place name, address, or Maps share / long URL.")),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
@@ -63,9 +82,40 @@ func ResolvePlace(ctx context.Context, c *Client, f Fetcher, query string) (Plac
 		return PlaceResult{}, errMissingKey
 	}
 	if looksLikeMapsURL(query) {
-		return resolvePlaceFromLink(ctx, c, f, query)
+		got, err := resolvePlaceFromLink(ctx, c, f, query)
+		if err != nil {
+			return PlaceResult{}, err
+		}
+		return enrichPlace(ctx, c, got), nil
 	}
-	return c.Geocode(ctx, query)
+	got, err := c.Geocode(ctx, query)
+	if err != nil {
+		return PlaceResult{}, err
+	}
+	return enrichPlace(ctx, c, got), nil
+}
+
+func enrichPlace(ctx context.Context, c *Client, got PlaceResult) PlaceResult {
+	if strings.TrimSpace(got.PlaceID) == "" {
+		return got
+	}
+	details, err := c.PlaceDetails(ctx, got.PlaceID)
+	if err != nil {
+		return got
+	}
+	if details.Name != "" {
+		got.Name = details.Name
+	}
+	if details.Address != "" {
+		got.Address = details.Address
+	}
+	got.Rating = details.Rating
+	got.Ratings = details.Ratings
+	got.OpenNow = details.OpenNow
+	got.URL = firstNonEmpty(details.URL, placeMapsURL(got.Name, got.PlaceID))
+	got.Website = details.Website
+	got.Reviews = details.Reviews
+	return got
 }
 
 func resolvePlaceFromLink(ctx context.Context, c *Client, f Fetcher, query string) (PlaceResult, error) {

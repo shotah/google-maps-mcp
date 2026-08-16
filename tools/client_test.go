@@ -139,6 +139,54 @@ func TestGeocodeHTTPError(t *testing.T) {
 	}
 }
 
+func TestTextSearchOK(t *testing.T) {
+	t.Parallel()
+	srv := newPlacesServer(t, placesSearchOK, nil)
+	got, err := testClient(srv).TextSearch(context.Background(), "sushi", "47.67,-122.38", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "Sushi Kappo" || got[0].OpenNow == nil || !*got[0].OpenNow {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestTextSearchInvalidJSON(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`not-json`))
+	}))
+	t.Cleanup(srv.Close)
+	_, err := testClient(srv).TextSearch(context.Background(), "x", "", 0)
+	if err == nil || !strings.Contains(err.Error(), "places search") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPlaceDetailsOK(t *testing.T) {
+	t.Parallel()
+	srv := newPlacesServer(t, nil, nil)
+	got, err := testClient(srv).PlaceDetails(context.Background(), "ChIJ1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Rating != 4.7 || got.Website == "" || len(got.Reviews) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestPlaceDetailsEmpty(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "OK", "result": map[string]any{}})
+	}))
+	t.Cleanup(srv.Close)
+	_, err := testClient(srv).PlaceDetails(context.Background(), "x")
+	if err == nil {
+		t.Fatal("expected empty result error")
+	}
+}
+
 func TestDirectionsOK(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

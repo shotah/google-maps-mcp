@@ -16,12 +16,13 @@ func TestToolNamesLocked(t *testing.T) {
 	t.Parallel()
 	re := regexp.MustCompile(`^[a-z]+_[a-z]+`)
 	names := ToolNames()
-	if len(names) != 3 {
-		t.Fatalf("ToolNames() len = %d, want 3: %v", len(names), names)
+	if len(names) != 4 {
+		t.Fatalf("ToolNames() len = %d, want 4: %v", len(names), names)
 	}
 	want := map[string]bool{
 		"link_resolve":  true,
 		"place_resolve": true,
+		"place_search":  true,
 		"route_eta":     true,
 	}
 	for _, name := range names {
@@ -64,6 +65,9 @@ func TestToolConstants(t *testing.T) {
 	}
 	if ToolPlace != "place_resolve" {
 		t.Fatalf("ToolPlace = %q, want place_resolve", ToolPlace)
+	}
+	if ToolSearch != "place_search" {
+		t.Fatalf("ToolSearch = %q, want place_search", ToolSearch)
 	}
 	if ToolRoute != "route_eta" {
 		t.Fatalf("ToolRoute = %q, want route_eta", ToolRoute)
