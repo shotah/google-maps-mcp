@@ -147,12 +147,18 @@ func (c *Client) geocode(ctx context.Context, q url.Values, query string) (Place
 	}, nil
 }
 
-// Directions returns the first driving route via the Directions API.
-func (c *Client) Directions(ctx context.Context, origin, destination, departureParam string) (RouteResult, error) {
+// Directions returns the first route via the Directions API.
+func (c *Client) Directions(ctx context.Context, origin, destination, departureParam, mode string) (RouteResult, error) {
+	if mode == "" {
+		mode = ModeDriving
+	}
 	q := url.Values{}
 	q.Set("origin", origin)
 	q.Set("destination", destination)
-	q.Set("departure_time", departureParam)
+	q.Set("mode", mode)
+	if departureParam != "" && (mode == ModeDriving || mode == ModeTransit) {
+		q.Set("departure_time", departureParam)
+	}
 	body, status, err := c.get(ctx, "/maps/api/directions/json", q)
 	if err != nil {
 		return RouteResult{}, err

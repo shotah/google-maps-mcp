@@ -13,12 +13,18 @@ import (
 func TestRouteETA(t *testing.T) {
 	t.Parallel()
 	srv := newDirectionsServer(t, directionsOK)
-	got, err := RouteETA(context.Background(), testClient(srv), nil, "Seattle", "Portland", "now")
+	got, err := RouteETA(context.Background(), testClient(srv), nil, "Seattle", "Portland", "now", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.DurationInTrafficSeconds != 10800 || got.ArrivalTime == "" || got.DepartureTime == "" {
 		t.Fatalf("%+v", got)
+	}
+	if got.Mode != ModeDriving {
+		t.Fatalf("mode = %q", got.Mode)
+	}
+	if !strings.Contains(got.URL, "google.com/maps/dir/") || !strings.Contains(got.URL, "origin=Seattle") || !strings.Contains(got.URL, "destination=Portland") {
+		t.Fatalf("url = %q", got.URL)
 	}
 }
 
@@ -27,7 +33,7 @@ func TestRouteETAShareURLs(t *testing.T) {
 	srv := newDirectionsServer(t, directionsOK)
 	origin := "https://www.google.com/maps/place/Seattle/@47.6,-122.3,10z"
 	dest := "https://www.google.com/maps/dir/Seattle/Portland,+OR"
-	got, err := RouteETA(context.Background(), testClient(srv), &stubFetcher{err: errors.New("no fetch")}, origin, dest, "")
+	got, err := RouteETA(context.Background(), testClient(srv), &stubFetcher{err: errors.New("no fetch")}, origin, dest, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,11 +44,11 @@ func TestRouteETAShareURLs(t *testing.T) {
 
 func TestRouteETAMissingArgs(t *testing.T) {
 	t.Parallel()
-	_, err := RouteETA(context.Background(), NewClient("x"), nil, "", "Portland", "")
+	_, err := RouteETA(context.Background(), NewClient("x"), nil, "", "Portland", "", "")
 	if err == nil || !strings.Contains(err.Error(), "origin is required") {
 		t.Fatalf("err = %v", err)
 	}
-	_, err = RouteETA(context.Background(), NewClient("x"), nil, "Seattle", "", "")
+	_, err = RouteETA(context.Background(), NewClient("x"), nil, "Seattle", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "destination is required") {
 		t.Fatalf("err = %v", err)
 	}
@@ -50,7 +56,7 @@ func TestRouteETAMissingArgs(t *testing.T) {
 
 func TestRouteETANilClient(t *testing.T) {
 	t.Parallel()
-	_, err := RouteETA(context.Background(), nil, nil, "a", "b", "")
+	_, err := RouteETA(context.Background(), nil, nil, "a", "b", "", "")
 	if err == nil || !errors.Is(err, errMissingKey) {
 		t.Fatalf("err = %v", err)
 	}
@@ -58,7 +64,7 @@ func TestRouteETANilClient(t *testing.T) {
 
 func TestRouteETABadDeparture(t *testing.T) {
 	t.Parallel()
-	_, err := RouteETA(context.Background(), NewClient("x"), nil, "a", "b", "soon")
+	_, err := RouteETA(context.Background(), NewClient("x"), nil, "a", "b", "soon", "")
 	if err == nil || !strings.Contains(err.Error(), "departure_time") {
 		t.Fatalf("err = %v", err)
 	}
@@ -110,7 +116,7 @@ func TestRouteETADurationFallback(t *testing.T) {
 		}},
 	}
 	srv := newDirectionsServer(t, payload)
-	got, err := RouteETA(context.Background(), testClient(srv), nil, "A", "B", "now")
+	got, err := RouteETA(context.Background(), testClient(srv), nil, "A", "B", "now", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +152,61 @@ func TestTeachRoute(t *testing.T) {
 	}
 }
 
+func TestNormalizeMode(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"":          ModeDriving,
+		"driving":   ModeDriving,
+		"DRIVE":     ModeDriving,
+		"walk":      ModeWalking,
+		"bike":      ModeBicycling,
+		"bicycling": ModeBicycling,
+		"transit":   ModeTransit,
+		"train":     ModeTransit,
+	}
+	for in, want := range cases {
+		got, err := normalizeMode(in)
+		if err != nil || got != want {
+			t.Errorf("normalizeMode(%q) = %q %v, want %q", in, got, err, want)
+		}
+	}
+	if _, err := normalizeMode("hoverboard"); err == nil || !strings.Contains(err.Error(), "mode must be") {
+		t.Fatalf("expected bad mode, got %v", err)
+	}
+}
+
+func TestRouteETABike(t *testing.T) {
+	t.Parallel()
+	var gotMode, gotDepart string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMode = r.URL.Query().Get("mode")
+		gotDepart = r.URL.Query().Get("departure_time")
+		_ = json.NewEncoder(w).Encode(directionsOK)
+	}))
+	t.Cleanup(srv.Close)
+	got, err := RouteETA(context.Background(), testClient(srv), nil, "Seattle", "Portland", "now", "bike")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMode != ModeBicycling {
+		t.Fatalf("api mode = %q", gotMode)
+	}
+	if gotDepart != "" {
+		t.Fatalf("departure_time should be omitted for bike, got %q", gotDepart)
+	}
+	if got.Mode != ModeBicycling || !strings.Contains(got.URL, "travelmode=bicycling") {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestRouteETABadMode(t *testing.T) {
+	t.Parallel()
+	_, err := RouteETA(context.Background(), NewClient("x"), nil, "a", "b", "", "hoverboard")
+	if err == nil || !strings.Contains(err.Error(), "mode must be") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestHandleRouteMissingArgs(t *testing.T) {
 	t.Parallel()
 	text := callHandlerErr(t, handleRoute, map[string]any{})
@@ -177,14 +238,31 @@ func TestHandleRouteSuccess(t *testing.T) {
 	newClient = func() (*Client, error) { return testClient(srv), nil }
 
 	text := callHandlerOK(t, handleRoute, map[string]any{
-		"origin": "Seattle", "destination": "Portland", "departure_time": "now",
+		"origin": "Seattle", "destination": "Portland", "departure_time": "now", "mode": "walking",
 	})
 	var got RouteResult
 	if err := json.Unmarshal([]byte(text), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.DurationSeconds != 9900 {
+	if got.DurationSeconds != 9900 || got.Mode != ModeWalking {
 		t.Fatalf("%+v", got)
+	}
+	if !strings.Contains(got.URL, "travelmode=walking") {
+		t.Fatalf("url = %q", got.URL)
+	}
+}
+
+func TestDirectionsURL(t *testing.T) {
+	t.Parallel()
+	got := directionsURL("Space Needle", "47.6097,-122.3425", ModeDriving)
+	if !strings.HasPrefix(got, "https://www.google.com/maps/dir/?") {
+		t.Fatalf("prefix = %q", got)
+	}
+	if !strings.Contains(got, "api=1") || !strings.Contains(got, "travelmode=driving") {
+		t.Fatalf("query = %q", got)
+	}
+	if !strings.Contains(got, "origin=Space+Needle") || !strings.Contains(got, "destination=47.6097%2C-122.3425") {
+		t.Fatalf("waypoints = %q", got)
 	}
 }
 

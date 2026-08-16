@@ -25,7 +25,7 @@ Naming contract: [ai-gantry `docs/mcp-naming.md`](https://github.com/shotah/ai-g
 | --- | --- | --- | --- |
 | `link_resolve` | `maps__link_resolve` | none | Follow a Maps share / short URL → canonical `google.com/maps/…` plus name / coords / dir endpoints |
 | `place_resolve` | `maps__place_resolve` | `GOOGLE_MAPS_API_KEY` | Query or address → place_id, lat/lng, name. Share URLs are expanded first |
-| `route_eta` | `maps__route_eta` | `GOOGLE_MAPS_API_KEY` | Origin + destination (names, coords, or share URLs) → duration in traffic |
+| `route_eta` | `maps__route_eta` | `GOOGLE_MAPS_API_KEY` | Origin + destination → duration, distance, and a tap-to-open Maps URL. Optional `mode`: driving (default), walking, bicycling, transit |
 
 `link_resolve` accepts `maps.app.goo.gl`, `goo.gl/maps`, `g.co/maps`, and already-long `google.com/maps` URLs (parsed, no fetch). Redirects stay on Maps hosts only.
 

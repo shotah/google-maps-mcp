@@ -148,6 +148,9 @@ func TestDirectionsOK(t *testing.T) {
 		if r.URL.Query().Get("departure_time") != "now" {
 			t.Errorf("departure_time = %q", r.URL.Query().Get("departure_time"))
 		}
+		if r.URL.Query().Get("mode") != ModeDriving {
+			t.Errorf("mode = %q", r.URL.Query().Get("mode"))
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": "OK",
 			"routes": []map[string]any{{
@@ -165,12 +168,41 @@ func TestDirectionsOK(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	got, err := testClient(srv).Directions(context.Background(), "Seattle", "Portland", "now")
+	got, err := testClient(srv).Directions(context.Background(), "Seattle", "Portland", "now", ModeDriving)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.DurationInTrafficSeconds != 10800 || got.DistanceMeters != 280000 || got.Summary != "I-5 S" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestDirectionsWalkingOmitsDeparture(t *testing.T) {
+	t.Parallel()
+	var gotMode, gotDepart string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMode = r.URL.Query().Get("mode")
+		gotDepart = r.URL.Query().Get("departure_time")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "OK",
+			"routes": []map[string]any{{
+				"summary": "trail",
+				"legs": []map[string]any{{
+					"start_address": "A",
+					"end_address":   "B",
+					"distance":      map[string]any{"text": "1 mi", "value": 1600},
+					"duration":      map[string]any{"text": "20 mins", "value": 1200},
+				}},
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	got, err := testClient(srv).Directions(context.Background(), "A", "B", "now", ModeWalking)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMode != ModeWalking || gotDepart != "" || got.DurationSeconds != 1200 {
+		t.Fatalf("mode=%q depart=%q got=%+v", gotMode, gotDepart, got)
 	}
 }
 
@@ -180,7 +212,7 @@ func TestDirectionsInvalidJSON(t *testing.T) {
 		_, _ = w.Write([]byte(`{`))
 	}))
 	t.Cleanup(srv.Close)
-	_, err := testClient(srv).Directions(context.Background(), "a", "b", "now")
+	_, err := testClient(srv).Directions(context.Background(), "a", "b", "now", ModeDriving)
 	if err == nil || !strings.Contains(err.Error(), "directions") {
 		t.Fatalf("err = %v", err)
 	}
@@ -192,7 +224,7 @@ func TestDirectionsEmptyRoutes(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "OK", "routes": []any{}})
 	}))
 	t.Cleanup(srv.Close)
-	_, err := testClient(srv).Directions(context.Background(), "a", "b", "now")
+	_, err := testClient(srv).Directions(context.Background(), "a", "b", "now", ModeDriving)
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("err = %v", err)
@@ -206,7 +238,7 @@ func TestDirectionsHTTPError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"INVALID_REQUEST"}`))
 	}))
 	t.Cleanup(srv.Close)
-	_, err := testClient(srv).Directions(context.Background(), "a", "b", "now")
+	_, err := testClient(srv).Directions(context.Background(), "a", "b", "now", ModeDriving)
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != "INVALID_REQUEST" {
 		t.Fatalf("err = %v", err)
