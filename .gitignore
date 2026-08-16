@@ -1,0 +1,30 @@
+# Built binaries
+/bin/
+/google-maps-mcp
+/google-maps-mcp.exe
+
+# Secrets
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / coverage artifacts
+*.test
+*.out
+coverage
+coverage.out
+coverage.txt
+coverage.html
+*.coverprofile
+
+# Local badge output (CI publishes to gh-pages)
+/badges/
