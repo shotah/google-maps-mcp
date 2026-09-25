@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -41,8 +40,8 @@ type PlaceSearchResult struct {
 
 func registerSearch(s *mcpserver.MCPServer) {
 	tool := mcp.NewTool(ToolSearch,
-		mcp.WithDescription("Find a few places matching a query, optionally near a location. Use for “sushi restaurants near Ballard”, “coffee by the gym”, and “recommend a few spots”. Returns name, rating, address, and a Maps URL for each. Not a city-wide dump — default 5, max 8. Needs GOOGLE_MAPS_API_KEY and Places API. For one known pin use place_resolve."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("What to find, e.g. sushi restaurants, coffee, climbing gym.")),
+		mcp.WithDescription("Find a few places for each query, optionally near a location. Pass every search in queries (max 8). Use for “sushi restaurants near Ballard”, “coffee by the gym”, and “recommend a few spots”. Returns name, rating, address, and a Maps URL for each. Not a city-wide dump — default 5, max 8 hits per query. Needs GOOGLE_MAPS_API_KEY and Places API. For known pins use place_resolve."),
+		mcp.WithArray("queries", mcp.Required(), mcp.Description("What to find, e.g. sushi restaurants, coffee, climbing gym. 1–8 queries."), mcp.WithStringItems(), mcp.MinItems(1), mcp.MaxItems(maxBatch)),
 		mcp.WithString("near", mcp.Description("Bias results to a place name, lat,lng, or Maps share URL.")),
 		mcp.WithNumber("limit", mcp.Description("How many places to return (default 5, max 8).")),
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -50,10 +49,19 @@ func registerSearch(s *mcpserver.MCPServer) {
 	registerTool(s, tool, handleSearch)
 }
 
+// SearchOutcome is one place_search result. Error is set when that query failed.
+type SearchOutcome struct {
+	PlaceSearchResult
+	Error string `json:"error,omitempty"`
+}
+
 func handleSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	query, err := request.RequireString("query")
+	if err := rejectSingular(request, "query", "queries", nextPlaceSearch); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	queries, err := requireStrings(request, "queries", nextPlaceSearch)
 	if err != nil {
-		return mcp.NewToolResultError(`query is required. ` + nextPlaceSearch), nil
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	near := request.GetString("near", "")
 	limit := request.GetInt("limit", defaultSearchLimit)
@@ -61,15 +69,17 @@ func handleSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTo
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	result, err := SearchPlaces(ctx, client, newFetcher(), query, near, limit)
-	if err != nil {
-		return mcp.NewToolResultError(teachSearch(err, query)), nil
+	f := newFetcher()
+	out := make([]SearchOutcome, 0, len(queries))
+	for _, query := range queries {
+		got, err := SearchPlaces(ctx, client, f, query, near, limit)
+		if err != nil {
+			out = append(out, SearchOutcome{PlaceSearchResult: PlaceSearchResult{Query: query, Near: near, Places: []PlaceHit{}}, Error: teachSearch(err, query)})
+			continue
+		}
+		out = append(out, SearchOutcome{PlaceSearchResult: got})
 	}
-	b, err := json.Marshal(result)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	return mcp.NewToolResultText(string(b)), nil
+	return batchText(out)
 }
 
 // SearchPlaces runs Places Text Search. near biases to a location when set.
@@ -133,14 +143,14 @@ func teachSearch(err error, query string) string {
 	if errors.As(err, &apiErr) {
 		switch apiErr.Status {
 		case "REQUEST_DENIED":
-			return `GOOGLE_MAPS_API_KEY was rejected or Places API is not enabled. Next: enable Places API on the key, then place_search(query="sushi restaurants", near="Ballard")`
+			return `GOOGLE_MAPS_API_KEY was rejected or Places API is not enabled. Next: enable Places API on the key, then ` + nextPlaceSearch[len("Next: "):]
 		case "ZERO_RESULTS":
 			return fmt.Sprintf("no places found for %q. %s", query, nextPlaceSearch)
 		case "OVER_QUERY_LIMIT":
-			return `Maps API quota exceeded. Next: wait, then place_search(query="…")`
+			return `Maps API quota exceeded. Next: wait, then place_search(queries=["…"])`
 		}
 		if apiErr.HTTPStatus == http.StatusUnauthorized || apiErr.HTTPStatus == http.StatusForbidden {
-			return `GOOGLE_MAPS_API_KEY was rejected or Places API is not enabled. Next: enable Places API on the key, then place_search(query="sushi restaurants", near="Ballard")`
+			return `GOOGLE_MAPS_API_KEY was rejected or Places API is not enabled. Next: enable Places API on the key, then ` + nextPlaceSearch[len("Next: "):]
 		}
 	}
 	return err.Error()

@@ -23,10 +23,10 @@ Naming contract: [ai-gantry `docs/mcp-naming.md`](https://github.com/shotah/ai-g
 
 | Tool | Host name | Auth | What it does |
 | --- | --- | --- | --- |
-| `link_resolve` | `maps__link_resolve` | none | Follow a Maps share / short URL → canonical `google.com/maps/…` plus name / coords / dir endpoints |
-| `place_resolve` | `maps__place_resolve` | `GOOGLE_MAPS_API_KEY` | One place (name, address, or share URL) → coords, rating, a few reviews, Maps URL |
-| `place_search` | `maps__place_search` | `GOOGLE_MAPS_API_KEY` | “sushi near Ballard” → a few rated places + Maps links. Optional `near`, `limit` (default 5, max 8) |
-| `route_eta` | `maps__route_eta` | `GOOGLE_MAPS_API_KEY` | Origin + destination → duration, distance, and a tap-to-open Maps URL. Optional `mode`: driving (default), walking, bicycling, transit |
+| `link_resolve` | `maps__link_resolve` | none | `urls` (1–8) → canonical `google.com/maps/…` plus name / coords / dir endpoints for each |
+| `place_resolve` | `maps__place_resolve` | `GOOGLE_MAPS_API_KEY` | `queries` (1–8 names, addresses, or share URLs) → coords, rating, a few reviews, Maps URL for each |
+| `place_search` | `maps__place_search` | `GOOGLE_MAPS_API_KEY` | `queries` (1–8) → a few rated places + Maps links each. Optional shared `near`, `limit` (default 5, max 8 hits per query) |
+| `route_eta` | `maps__route_eta` | `GOOGLE_MAPS_API_KEY` | `routes` (1–8 `{origin, destination}`) → duration, distance, and a tap-to-open Maps URL each. Optional `mode` and `departure_time` on each route |
 
 `link_resolve` accepts `maps.app.goo.gl`, `goo.gl/maps`, `g.co/maps`, and already-long `google.com/maps` URLs (parsed, no fetch). Redirects stay on Maps hosts only.
 

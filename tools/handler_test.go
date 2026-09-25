@@ -16,12 +16,12 @@ func TestMCPCallLinkResolve(t *testing.T) {
 	t.Parallel()
 	s := newToolServer(t)
 	text, isErr := callTool(t, s, ToolLink, map[string]any{
-		"url": "https://www.google.com/maps/place/Space+Needle/@47.6205,-122.3493,17z",
+		"urls": []any{"https://www.google.com/maps/place/Space+Needle/@47.6205,-122.3493,17z"},
 	})
 	if isErr {
 		t.Fatalf("link_resolve error: %s", text)
 	}
-	if !strings.Contains(text, `"kind":"place"`) || !strings.Contains(text, "Space Needle") {
+	if !strings.Contains(text, `"results"`) || !strings.Contains(text, `"kind":"place"`) || !strings.Contains(text, "Space Needle") {
 		t.Fatalf("payload = %s", text)
 	}
 }
@@ -33,7 +33,7 @@ func TestMCPCallPlaceResolveMissingKey(t *testing.T) {
 	newClient = clientFromEnv
 
 	s := newToolServer(t)
-	text, isErr := callTool(t, s, ToolPlace, map[string]any{"query": "Seattle"})
+	text, isErr := callTool(t, s, ToolPlace, map[string]any{"queries": []any{"Seattle"}})
 	if !isErr || !strings.Contains(text, "GOOGLE_MAPS_API_KEY") {
 		t.Fatalf("expected missing-key teach-in, got err=%v text=%s", isErr, text)
 	}

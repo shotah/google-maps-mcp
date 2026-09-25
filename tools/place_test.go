@@ -115,7 +115,7 @@ func TestTeachPlace(t *testing.T) {
 func TestHandlePlaceMissingQuery(t *testing.T) {
 	t.Parallel()
 	text := callHandlerErr(t, handlePlace, map[string]any{})
-	if !strings.Contains(text, "query is required") || !strings.Contains(text, "place_resolve") {
+	if !strings.Contains(text, "queries is required") || !strings.Contains(text, "place_resolve") {
 		t.Fatalf("teach-in = %q", text)
 	}
 }
@@ -126,7 +126,7 @@ func TestHandlePlaceMissingKey(t *testing.T) {
 	t.Cleanup(func() { newClient = old })
 	newClient = clientFromEnv
 
-	text := callHandlerErr(t, handlePlace, map[string]any{"query": "Seattle"})
+	text := callHandlerErr(t, handlePlace, map[string]any{"queries": []string{"Seattle"}})
 	if !strings.Contains(text, "GOOGLE_MAPS_API_KEY") {
 		t.Fatalf("text = %q", text)
 	}
@@ -139,12 +139,14 @@ func TestHandlePlaceSuccess(t *testing.T) {
 	newClient = func() (*Client, error) { return testClient(srv), nil }
 	newFetcher = func() Fetcher { return &stubFetcher{} }
 
-	text := callHandlerOK(t, handlePlace, map[string]any{"query": "Space Needle"})
-	var got PlaceResult
+	text := callHandlerOK(t, handlePlace, map[string]any{"queries": []string{"Space Needle"}})
+	var got struct {
+		Results []PlaceOutcome `json:"results"`
+	}
 	if err := json.Unmarshal([]byte(text), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.PlaceID != "ChIJ1" {
+	if len(got.Results) != 1 || got.Results[0].PlaceID != "ChIJ1" {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -158,7 +160,7 @@ func TestHandlePlaceAPIError(t *testing.T) {
 	t.Cleanup(func() { newClient = old })
 	newClient = func() (*Client, error) { return testClient(srv), nil }
 
-	text := callHandlerErr(t, handlePlace, map[string]any{"query": "zzz"})
+	text := callHandlerOK(t, handlePlace, map[string]any{"queries": []string{"zzz"}})
 	if !strings.Contains(text, "no place found") {
 		t.Fatalf("text = %q", text)
 	}

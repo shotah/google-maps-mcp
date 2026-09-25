@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -18,6 +17,7 @@ var (
 	errURLRequired = errors.New(`url is required. ` + nextLinkResolve)
 	atCoordsRe     = regexp.MustCompile(`@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)`)
 	dataCoordsRe   = regexp.MustCompile(`!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)`)
+	latLngPairRe   = regexp.MustCompile(`(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)`)
 )
 
 // newFetcher builds the share-link HTTP client. Tests replace this.
@@ -37,27 +37,38 @@ type LinkResult struct {
 
 func registerLink(s *mcpserver.MCPServer) {
 	tool := mcp.NewTool(ToolLink,
-		mcp.WithDescription("Turn a Google Maps share or short URL (maps.app.goo.gl, goo.gl/maps, g.co/maps) into a canonical maps URL plus place name, coordinates, or directions endpoints. Use when a human pastes a share link. No API key. Already-long google.com/maps URLs are parsed without a fetch. Not a geocoder — use place_resolve for an address."),
-		mcp.WithString("url", mcp.Required(), mcp.Description("Maps share URL, short URL, or already-long google.com/maps URL.")),
+		mcp.WithDescription("Turn one or more Google Maps share or short URLs (maps.app.goo.gl, goo.gl/maps, g.co/maps) into canonical maps URLs plus place name, coordinates, or directions endpoints. Pass every link in urls (max 8). No API key. Already-long google.com/maps URLs are parsed without a fetch. Not a geocoder — use place_resolve for an address."),
+		mcp.WithArray("urls", mcp.Required(), mcp.Description("Maps share URLs, short URLs, or already-long google.com/maps URLs. 1–8."), mcp.WithStringItems(), mcp.MinItems(1), mcp.MaxItems(maxBatch)),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
 	registerTool(s, tool, handleLink)
 }
 
+// LinkOutcome is one link_resolve result. Error is set when that URL failed.
+type LinkOutcome struct {
+	LinkResult
+	Error string `json:"error,omitempty"`
+}
+
 func handleLink(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	rawURL, err := request.RequireString("url")
-	if err != nil {
-		return mcp.NewToolResultError(errURLRequired.Error()), nil
+	if err := rejectSingular(request, "url", "urls", nextLinkResolve); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
-	result, err := ResolveLink(ctx, newFetcher(), rawURL)
+	urls, err := requireStrings(request, "urls", nextLinkResolve)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	b, err := json.Marshal(result)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+	f := newFetcher()
+	out := make([]LinkOutcome, 0, len(urls))
+	for _, rawURL := range urls {
+		got, err := ResolveLink(ctx, f, rawURL)
+		if err != nil {
+			out = append(out, LinkOutcome{LinkResult: LinkResult{URL: rawURL}, Error: err.Error()})
+			continue
+		}
+		out = append(out, LinkOutcome{LinkResult: got})
 	}
-	return mcp.NewToolResultText(string(b)), nil
+	return batchText(out)
 }
 
 // ResolveLink follows a Maps share / short URL (or parses a long maps URL)
@@ -290,11 +301,11 @@ func extractDataCoords(raw string) (float64, float64, bool) {
 
 func parseLatLng(s string) (float64, float64, bool) {
 	s = strings.TrimSpace(s)
-	parts := strings.Split(s, ",")
-	if len(parts) < 2 {
-		return 0, 0, false
+	// First lat,lng pair, so maps `near` can take a `[last pin]` footer line.
+	if m := latLngPairRe.FindStringSubmatch(s); m != nil {
+		return parseFloatPair(m[1], m[2])
 	}
-	return parseFloatPair(parts[0], parts[1])
+	return 0, 0, false
 }
 
 func parseFloatPair(a, b string) (float64, float64, bool) {

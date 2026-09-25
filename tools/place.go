@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -45,31 +44,42 @@ type PlaceResult struct {
 
 func registerPlace(s *mcpserver.MCPServer) {
 	tool := mcp.NewTool(ToolPlace,
-		mcp.WithDescription("Look up one place by name, address, or Maps share URL. Returns place_id, coordinates, rating, a few reviews, and a Maps URL. Use for “what is this pin” and “tell me about X”. For “sushi near Ballard” use place_search. Needs GOOGLE_MAPS_API_KEY."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Place name, address, or Maps share / long URL.")),
+		mcp.WithDescription("Look up one or more places by name, address, or Maps share URL. Pass every lookup in queries (max 8). Returns place_id, coordinates, rating, a few reviews, and a Maps URL for each. Use for “what is this pin” and “tell me about X”. For “sushi near Ballard” use place_search. Needs GOOGLE_MAPS_API_KEY."),
+		mcp.WithArray("queries", mcp.Required(), mcp.Description("Place names, addresses, or Maps share / long URLs. 1–8."), mcp.WithStringItems(), mcp.MinItems(1), mcp.MaxItems(maxBatch)),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
 	registerTool(s, tool, handlePlace)
 }
 
+// PlaceOutcome is one place_resolve result. Error is set when that query failed.
+type PlaceOutcome struct {
+	PlaceResult
+	Error string `json:"error,omitempty"`
+}
+
 func handlePlace(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	query, err := request.RequireString("query")
+	if err := rejectSingular(request, "query", "queries", nextPlaceResolve); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	queries, err := requireStrings(request, "queries", nextPlaceResolve)
 	if err != nil {
-		return mcp.NewToolResultError(errQueryRequired.Error()), nil
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	client, err := newClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	result, err := ResolvePlace(ctx, client, newFetcher(), query)
-	if err != nil {
-		return mcp.NewToolResultError(teachPlace(err, query)), nil
+	f := newFetcher()
+	out := make([]PlaceOutcome, 0, len(queries))
+	for _, query := range queries {
+		got, err := ResolvePlace(ctx, client, f, query)
+		if err != nil {
+			out = append(out, PlaceOutcome{PlaceResult: PlaceResult{Query: query}, Error: teachPlace(err, query)})
+			continue
+		}
+		out = append(out, PlaceOutcome{PlaceResult: got})
 	}
-	b, err := json.Marshal(result)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	return mcp.NewToolResultText(string(b)), nil
+	return batchText(out)
 }
 
 // ResolvePlace geocodes query. Maps share URLs are expanded first.
@@ -151,14 +161,14 @@ func teachPlace(err error, query string) string {
 	if errors.As(err, &apiErr) {
 		switch apiErr.Status {
 		case "REQUEST_DENIED":
-			return `GOOGLE_MAPS_API_KEY was rejected. Next: set a valid Maps Platform key on this process, then place_resolve(query="Space Needle")`
+			return `GOOGLE_MAPS_API_KEY was rejected. Next: set a valid Maps Platform key on this process, then ` + nextPlaceResolve[len("Next: "):]
 		case "ZERO_RESULTS":
 			return fmt.Sprintf("no place found for %q. %s", query, nextPlaceResolve)
 		case "OVER_QUERY_LIMIT":
-			return `Maps API quota exceeded. Next: wait, then place_resolve(query="…")`
+			return `Maps API quota exceeded. Next: wait, then place_resolve(queries=["…"])`
 		}
 		if apiErr.HTTPStatus == http.StatusUnauthorized || apiErr.HTTPStatus == http.StatusForbidden {
-			return `GOOGLE_MAPS_API_KEY was rejected. Next: set a valid Maps Platform key on this process, then place_resolve(query="Space Needle")`
+			return `GOOGLE_MAPS_API_KEY was rejected. Next: set a valid Maps Platform key on this process, then ` + nextPlaceResolve[len("Next: "):]
 		}
 	}
 	return err.Error()

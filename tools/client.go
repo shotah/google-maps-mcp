@@ -16,7 +16,7 @@ import (
 
 const defaultMapsBase = "https://maps.googleapis.com"
 
-var errMissingKey = errors.New(`GOOGLE_MAPS_API_KEY is not set. Next: set GOOGLE_MAPS_API_KEY on this process (Maps Platform key), then place_resolve(query="Space Needle") or place_search(query="sushi near Ballard")`)
+var errMissingKey = errors.New(`GOOGLE_MAPS_API_KEY is not set. Next: set GOOGLE_MAPS_API_KEY on this process (Maps Platform key), then place_resolve(queries=["Space Needle"]) or place_search(queries=["sushi near Ballard"])`)
 
 // newClient builds the Maps Platform client. Tests replace this.
 var newClient = clientFromEnv

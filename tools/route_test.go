@@ -210,11 +210,11 @@ func TestRouteETABadMode(t *testing.T) {
 func TestHandleRouteMissingArgs(t *testing.T) {
 	t.Parallel()
 	text := callHandlerErr(t, handleRoute, map[string]any{})
-	if !strings.Contains(text, "origin is required") {
+	if !strings.Contains(text, "routes is required") {
 		t.Fatalf("text = %q", text)
 	}
-	text = callHandlerErr(t, handleRoute, map[string]any{"origin": "Seattle"})
-	if !strings.Contains(text, "destination is required") {
+	text = callHandlerErr(t, handleRoute, map[string]any{"origin": "Seattle", "destination": "Portland"})
+	if !strings.Contains(text, "origin is not a parameter") {
 		t.Fatalf("text = %q", text)
 	}
 }
@@ -225,7 +225,7 @@ func TestHandleRouteMissingKey(t *testing.T) {
 	t.Cleanup(func() { newClient = old })
 	newClient = clientFromEnv
 
-	text := callHandlerErr(t, handleRoute, map[string]any{"origin": "a", "destination": "b"})
+	text := callHandlerErr(t, handleRoute, map[string]any{"routes": []map[string]any{{"origin": "a", "destination": "b"}}})
 	if !strings.Contains(text, "GOOGLE_MAPS_API_KEY") {
 		t.Fatalf("text = %q", text)
 	}
@@ -238,17 +238,21 @@ func TestHandleRouteSuccess(t *testing.T) {
 	newClient = func() (*Client, error) { return testClient(srv), nil }
 
 	text := callHandlerOK(t, handleRoute, map[string]any{
-		"origin": "Seattle", "destination": "Portland", "departure_time": "now", "mode": "walking",
+		"routes": []map[string]any{{
+			"origin": "Seattle", "destination": "Portland", "departure_time": "now", "mode": "walking",
+		}},
 	})
-	var got RouteResult
+	var got struct {
+		Results []RouteOutcome `json:"results"`
+	}
 	if err := json.Unmarshal([]byte(text), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.DurationSeconds != 9900 || got.Mode != ModeWalking {
+	if len(got.Results) != 1 || got.Results[0].DurationSeconds != 9900 || got.Results[0].Mode != ModeWalking {
 		t.Fatalf("%+v", got)
 	}
-	if !strings.Contains(got.URL, "travelmode=walking") {
-		t.Fatalf("url = %q", got.URL)
+	if !strings.Contains(got.Results[0].URL, "travelmode=walking") {
+		t.Fatalf("url = %q", got.Results[0].URL)
 	}
 }
 
@@ -275,7 +279,7 @@ func TestHandleRouteAPIError(t *testing.T) {
 	t.Cleanup(func() { newClient = old })
 	newClient = func() (*Client, error) { return testClient(srv), nil }
 
-	text := callHandlerErr(t, handleRoute, map[string]any{"origin": "a", "destination": "b"})
+	text := callHandlerOK(t, handleRoute, map[string]any{"routes": []map[string]any{{"origin": "a", "destination": "b"}}})
 	if !strings.Contains(text, "no route found") {
 		t.Fatalf("text = %q", text)
 	}
@@ -284,7 +288,7 @@ func TestHandleRouteAPIError(t *testing.T) {
 func TestHandleLinkMissingURL(t *testing.T) {
 	t.Parallel()
 	text := callHandlerErr(t, handleLink, map[string]any{})
-	if !strings.Contains(text, "url is required") || !strings.Contains(text, "link_resolve") {
+	if !strings.Contains(text, "urls is required") || !strings.Contains(text, "link_resolve") {
 		t.Fatalf("text = %q", text)
 	}
 }
@@ -292,20 +296,22 @@ func TestHandleLinkMissingURL(t *testing.T) {
 func TestHandleLinkSuccess(t *testing.T) {
 	t.Parallel()
 	text := callHandlerOK(t, handleLink, map[string]any{
-		"url": "https://www.google.com/maps/place/Space+Needle/@47.6205,-122.3493,17z",
+		"urls": []string{"https://www.google.com/maps/place/Space+Needle/@47.6205,-122.3493,17z"},
 	})
-	var got LinkResult
+	var got struct {
+		Results []LinkOutcome `json:"results"`
+	}
 	if err := json.Unmarshal([]byte(text), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Kind != KindPlace || got.Name != "Space Needle" {
+	if len(got.Results) != 1 || got.Results[0].Kind != KindPlace || got.Results[0].Name != "Space Needle" {
 		t.Fatalf("%+v", got)
 	}
 }
 
 func TestHandleLinkError(t *testing.T) {
 	t.Parallel()
-	text := callHandlerErr(t, handleLink, map[string]any{"url": "https://example.com/x"})
+	text := callHandlerOK(t, handleLink, map[string]any{"urls": []string{"https://example.com/x"}})
 	if !strings.Contains(text, "not a Google Maps host") {
 		t.Fatalf("text = %q", text)
 	}

@@ -118,7 +118,7 @@ func TestTeachSearch(t *testing.T) {
 func TestHandleSearchMissingQuery(t *testing.T) {
 	t.Parallel()
 	text := callHandlerErr(t, handleSearch, map[string]any{})
-	if !strings.Contains(text, "query is required") || !strings.Contains(text, "place_search") {
+	if !strings.Contains(text, "queries is required") || !strings.Contains(text, "place_search") {
 		t.Fatalf("text = %q", text)
 	}
 }
@@ -129,12 +129,14 @@ func TestHandleSearchSuccess(t *testing.T) {
 	t.Cleanup(func() { newClient = old })
 	newClient = func() (*Client, error) { return testClient(srv), nil }
 
-	text := callHandlerOK(t, handleSearch, map[string]any{"query": "sushi", "limit": 2})
-	var got PlaceSearchResult
+	text := callHandlerOK(t, handleSearch, map[string]any{"queries": []string{"sushi"}, "limit": 2})
+	var got struct {
+		Results []SearchOutcome `json:"results"`
+	}
 	if err := json.Unmarshal([]byte(text), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Places) != 2 {
+	if len(got.Results) != 1 || len(got.Results[0].Places) != 2 {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -145,7 +147,7 @@ func TestHandleSearchMissingKey(t *testing.T) {
 	t.Cleanup(func() { newClient = old })
 	newClient = clientFromEnv
 
-	text := callHandlerErr(t, handleSearch, map[string]any{"query": "sushi"})
+	text := callHandlerErr(t, handleSearch, map[string]any{"queries": []string{"sushi"}})
 	if !strings.Contains(text, "GOOGLE_MAPS_API_KEY") {
 		t.Fatalf("text = %q", text)
 	}

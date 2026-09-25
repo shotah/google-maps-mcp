@@ -26,10 +26,10 @@ const (
 )
 
 const (
-	nextLinkResolve  = `Next: link_resolve(url="https://maps.app.goo.gl/…")`
-	nextPlaceResolve = `Next: place_resolve(query="Space Needle")`
-	nextPlaceSearch  = `Next: place_search(query="sushi restaurants", near="Ballard")`
-	nextRouteETA     = `Next: route_eta(origin="Seattle", destination="Portland")`
+	nextLinkResolve  = `Next: link_resolve(urls=["https://maps.app.goo.gl/…"])`
+	nextPlaceResolve = `Next: place_resolve(queries=["Space Needle"])`
+	nextPlaceSearch  = `Next: place_search(queries=["sushi restaurants"], near="Ballard")`
+	nextRouteETA     = `Next: route_eta(routes=[{"origin":"Seattle","destination":"Portland"}])`
 )
 
 // ToolNames is the registered catalog (tests lock naming).

@@ -27,7 +27,7 @@ Rules:
 4. **No dual aliases.** No `maps_*` synonym. No `short_url_*`.
 5. Tests: every name matches `^[a-z]+_[a-z]+` and does **not** start with `maps`.
 
-Descriptions lead with agent intent. Args are snake_case (`url`, `query`, `origin`, `destination`). Teach-in errors name the next call (`Next: link_resolve(url="https://maps.app.goo.gl/…")`).
+Descriptions lead with agent intent. Args are snake_case lists (`urls`, `queries`, `routes`). Teach-in errors name the next call (`Next: link_resolve(urls=["https://maps.app.goo.gl/…"])`). Do not accept a singular `url`, `query`, `origin`, or `destination`.
 
 ## GCP APIs to enable
 

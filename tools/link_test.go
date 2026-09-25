@@ -261,6 +261,18 @@ func TestParseLatLngRejects(t *testing.T) {
 	}
 }
 
+func TestParseLatLng_LastPinFooter(t *testing.T) {
+	t.Parallel()
+	lat, lng, ok := parseLatLng("[last pin ±8m] 47.600000, -122.300000 at Wed Sep 9, 2026 9:44 PM PDT (just now)")
+	if !ok || lat != 47.6 || lng != -122.3 {
+		t.Fatalf("last pin footer: lat=%v lng=%v ok=%v", lat, lng, ok)
+	}
+	lat, lng, ok = parseLatLng("47.6, -122.3")
+	if !ok || lat != 47.6 || lng != -122.3 {
+		t.Fatalf("bare pair: lat=%v lng=%v ok=%v", lat, lng, ok)
+	}
+}
+
 func TestPathSegmentBadEscape(t *testing.T) {
 	t.Parallel()
 	if pathSegment("%zz") == "" {
